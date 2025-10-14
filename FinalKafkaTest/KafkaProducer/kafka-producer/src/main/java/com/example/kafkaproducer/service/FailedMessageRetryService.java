@@ -29,6 +29,13 @@ public class FailedMessageRetryService {
 
         for (FailedMessage failedMessage : failedMessages) {
             try {
+                if(failedMessage.getRetryCount() > 5) {
+                    TransactionEvent event = objectMapper.readValue(failedMessage.getPayloadJson(), TransactionEvent.class);
+                    kafkaTemplate.send("transaction-logs-dlq", event.id(), event).get();
+                    log.warn("Moved message {} to DLQ after {} retries",  failedMessage.getId(), failedMessage.getRetryCount());
+                    failedMessageRepository.delete(failedMessage);
+                    continue;
+                }
                 TransactionEvent event = objectMapper.readValue(failedMessage.getPayloadJson(), TransactionEvent.class);
                 kafkaTemplate.send(failedMessage.getTopicName(), event.id(), event).get();
                 log.info("Retried and successfully sent message {}", failedMessage.getId());

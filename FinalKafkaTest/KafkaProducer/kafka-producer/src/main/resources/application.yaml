@@ -13,15 +13,27 @@ spring:
     show-sql: true
   kafka:
     producer:
-      bootstrap-servers: localhost:9092
+      bootstrap-servers: localhost:9093
       acks: all
-      retries: 10
+      retries: 5
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
         enable.idempotence: true
         spring.json.add.type.headers: false
         max.in.flight.requests.per.connection: 1
+    consumer:
+      bootstrap-servers: localhost:9092
+      group-id: producer-dlq-consumer-group
+      key-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.key.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: "*"
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.example.kafkaproducer.dto.TransactionEvent
+      auto-offset-reset: earliest
 
 server:
   port: 8081
