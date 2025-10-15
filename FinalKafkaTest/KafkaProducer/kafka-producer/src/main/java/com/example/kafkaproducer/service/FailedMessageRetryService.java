@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -18,15 +20,15 @@ import java.util.List;
 @Slf4j
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
+@EnableScheduling
 public class FailedMessageRetryService {
     FailedMessageRepository failedMessageRepository;
     KafkaTemplate<String, TransactionEvent> kafkaTemplate;
     ObjectMapper objectMapper;
 
     @Scheduled(fixedDelay = 60_000)
-    @Scheduled(fixedDelay = 60_000)
     public void retryFailedMessage() {
-        List<FailedMessage> failedMessages = failedMessageRepository.findTop10ByOrderByCreatedAtAsc();
+        List<FailedMessage> failedMessages = failedMessageRepository.findTop100ByOrderByCreatedAtAsc();
 
         for (FailedMessage failedMessage : failedMessages) {
             try {
@@ -39,11 +41,12 @@ public class FailedMessageRetryService {
                         log.warn("Moved message {} to DLQ after {} retries", failedMessage.getId(), failedMessage.getRetryCount());
                         failedMessageRepository.delete(failedMessage);
                     } catch (Exception dlqEx) {
+                        // QUAN TRỌNG: Nếu gửi DLQ thất bại, KHÔNG tăng retryCount nữa
                         failedMessage.setErrorMessage("Failed to send to DLQ: " + dlqEx.getMessage());
                         failedMessageRepository.save(failedMessage);
                         log.error("Failed to send message {} to DLQ: {}", failedMessage.getId(), dlqEx.getMessage());
                     }
-                    continue;
+                    continue; // Bỏ qua phần retry thường
                 }
 
                 // Retry bình thường (retryCount <= 5)
@@ -54,7 +57,7 @@ public class FailedMessageRetryService {
 
             } catch (Exception e) {
                 // Chỉ tăng retryCount nếu đang trong giai đoạn retry thường
-                if (failedMessage.getRetryCount() <= 5) {
+                if (failedMessage.getRetryCount() < 5) {
                     failedMessage.setRetryCount(failedMessage.getRetryCount() + 1);
                     failedMessage.setErrorMessage(e.getMessage());
                     failedMessageRepository.save(failedMessage);

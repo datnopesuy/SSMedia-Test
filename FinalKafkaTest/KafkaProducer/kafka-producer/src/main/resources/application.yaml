@@ -1,4 +1,7 @@
 spring:
+  logging:
+    pattern:
+      console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
   datasource:
     url: jdbc:oracle:thin:@//localhost:1521/FREEPDB1
     username: demo
@@ -19,6 +22,7 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       properties:
+        max.block.ms: 5000
         request.timeout.ms: 5000  # 5 giây
         delivery.timeout.ms: 10000  # 10 giây tổng
         enable.idempotence: true

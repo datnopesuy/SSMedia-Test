@@ -11,6 +11,7 @@ import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,7 @@ import java.util.UUID;
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @EnableScheduling
 @Slf4j
+
 public class ProducerService {
 
     KafkaTemplate<String, TransactionEvent> kafkaTemplate;
@@ -37,29 +39,33 @@ public class ProducerService {
     @Scheduled(fixedRate = 60_000)
     public void sendTransactionEvent() {
         for (int i = 0; i < 10; i++) {
-            TransactionEvent event = new TransactionEvent(
-                    UUID.randomUUID().toString(),
-                    LocalDateTime.now(),
-                    "user-" + random.nextInt(1000),
-                    BigDecimal.valueOf(random.nextDouble() * 1000)
-            );
-            var record = createProducerRecord(event);
             try {
-                kafkaTemplate.send(record).whenComplete((result, ex) -> {
-                    if(ex == null) {
-                        log.info("Sent to topic={}, key={}, partition={}",
-                                TOPIC,
-                                record.key(),
-                                result.getRecordMetadata().partition());
-                    } else {
-                        log.error("Failed to send message with key={} : {}", record.key(), ex.getMessage());
-                        saveFailedMessage(event, ex);
-                    }
-                });
+                TransactionEvent event = new TransactionEvent(
+                        UUID.randomUUID().toString(),
+                        LocalDateTime.now(),
+                        "user-" + random.nextInt(1000),
+                        BigDecimal.valueOf(random.nextDouble() * 1000)
+                );
+                var record = createProducerRecord(event);
+
+                try {
+                    kafkaTemplate.send(record).whenComplete((result, ex) -> {
+                        if(ex == null) {
+                            log.info("Sent to topic={}, key={}, partition={}",
+                                    TOPIC, record.key(), result.getRecordMetadata().partition());
+                        } else {
+                            log.error("Failed to send message with key={} : {}", record.key(), ex.getMessage());
+                            saveFailedMessage(event, ex);
+                        }
+                    });
+                } catch (Exception ex) {
+                    // Bắt exception đồng bộ (metadata timeout)
+                    log.error("Failed to send message with key={} : {}", record.key(), ex.getMessage());
+                    saveFailedMessage(event, ex);
+                }
             } catch (Exception ex) {
-                // Bắt exception đồng bộ (metadata timeout, serialization error, etc.)
-                log.error("Failed to send message with key={} : {}", record.key(), ex.getMessage());
-                saveFailedMessage(event, ex);
+                // Bắt mọi exception khác để vòng lặp tiếp tục
+                log.error("Unexpected error in iteration {}: {}", i, ex.getMessage());
             }
         }
     }
