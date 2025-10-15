@@ -21,30 +21,45 @@ import java.util.List;
 public class FailedMessageRetryService {
     FailedMessageRepository failedMessageRepository;
     KafkaTemplate<String, TransactionEvent> kafkaTemplate;
-    ObjectMapper objectMapper = new ObjectMapper();
+    ObjectMapper objectMapper;
 
     @Scheduled(fixedDelay = 60_000)
+    @Scheduled(fixedDelay = 60_000)
     public void retryFailedMessage() {
-        List<FailedMessage> failedMessages = failedMessageRepository.findTop100ByOrderByCreatedAtAsc();
+        List<FailedMessage> failedMessages = failedMessageRepository.findTop10ByOrderByCreatedAtAsc();
 
         for (FailedMessage failedMessage : failedMessages) {
             try {
                 if(failedMessage.getRetryCount() > 5) {
+                    // Đã vượt quá retry limit
                     TransactionEvent event = objectMapper.readValue(failedMessage.getPayloadJson(), TransactionEvent.class);
-                    kafkaTemplate.send("transaction-logs-dlq", event.id(), event).get();
-                    log.warn("Moved message {} to DLQ after {} retries",  failedMessage.getId(), failedMessage.getRetryCount());
-                    failedMessageRepository.delete(failedMessage);
+
+                    try {
+                        kafkaTemplate.send("transaction-logs-dlq", event.id(), event).get();
+                        log.warn("Moved message {} to DLQ after {} retries", failedMessage.getId(), failedMessage.getRetryCount());
+                        failedMessageRepository.delete(failedMessage);
+                    } catch (Exception dlqEx) {
+                        failedMessage.setErrorMessage("Failed to send to DLQ: " + dlqEx.getMessage());
+                        failedMessageRepository.save(failedMessage);
+                        log.error("Failed to send message {} to DLQ: {}", failedMessage.getId(), dlqEx.getMessage());
+                    }
                     continue;
                 }
+
+                // Retry bình thường (retryCount <= 5)
                 TransactionEvent event = objectMapper.readValue(failedMessage.getPayloadJson(), TransactionEvent.class);
                 kafkaTemplate.send(failedMessage.getTopicName(), event.id(), event).get();
                 log.info("Retried and successfully sent message {}", failedMessage.getId());
                 failedMessageRepository.delete(failedMessage);
-            }catch (Exception e) {
-                failedMessage.setRetryCount(failedMessage.getRetryCount() + 1);
-                failedMessage.setErrorMessage(e.getMessage());
-                failedMessageRepository.save(failedMessage);
-                log.warn("Retry failed for message {} (count={})", failedMessage.getId(), failedMessage.getRetryCount());
+
+            } catch (Exception e) {
+                // Chỉ tăng retryCount nếu đang trong giai đoạn retry thường
+                if (failedMessage.getRetryCount() <= 5) {
+                    failedMessage.setRetryCount(failedMessage.getRetryCount() + 1);
+                    failedMessage.setErrorMessage(e.getMessage());
+                    failedMessageRepository.save(failedMessage);
+                    log.warn("Retry failed for message {} (count={})", failedMessage.getId(), failedMessage.getRetryCount());
+                }
             }
         }
     }

@@ -23,7 +23,7 @@ import java.util.UUID;
 public class DeadLetterConsumerSevice {
 
     FailedMessageRepository failedMessageRepository;
-    ObjectMapper objectMapper = new ObjectMapper();
+    ObjectMapper objectMapper;
 
     @KafkaListener(topics = "transaction-logs-dlq", groupId = "producer-dlq-consumer-group", containerFactory = "kafkaListenerContainerFactory")
     public void consumerDeadLetterMessages(ConsumerRecord<String, TransactionEvent> record

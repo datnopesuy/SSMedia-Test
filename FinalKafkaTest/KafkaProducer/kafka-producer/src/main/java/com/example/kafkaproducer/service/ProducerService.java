@@ -29,7 +29,7 @@ public class ProducerService {
 
     KafkaTemplate<String, TransactionEvent> kafkaTemplate;
     FailedMessageRepository failedMessageRepository;
-    ObjectMapper objectMapper = new ObjectMapper();
+    ObjectMapper objectMapper;
 
     private static final String TOPIC = "transaction-logs";
     Random random = new Random();
@@ -44,17 +44,23 @@ public class ProducerService {
                     BigDecimal.valueOf(random.nextDouble() * 1000)
             );
             var record = createProducerRecord(event);
-            kafkaTemplate.send(record).whenComplete((result, ex) -> {
-                if(ex == null) {
-                    log.info("Sent to topic={}, key={}, partition={}",
-                            TOPIC,
-                            record.key(),
-                            result.getRecordMetadata().partition());
-                } else {
-                    log.error("Failed to send message with key={} : {}", record.key(), ex.getMessage());
-                    saveFailedMessage(event, ex);
-                }
-            });
+            try {
+                kafkaTemplate.send(record).whenComplete((result, ex) -> {
+                    if(ex == null) {
+                        log.info("Sent to topic={}, key={}, partition={}",
+                                TOPIC,
+                                record.key(),
+                                result.getRecordMetadata().partition());
+                    } else {
+                        log.error("Failed to send message with key={} : {}", record.key(), ex.getMessage());
+                        saveFailedMessage(event, ex);
+                    }
+                });
+            } catch (Exception ex) {
+                // Bắt exception đồng bộ (metadata timeout, serialization error, etc.)
+                log.error("Failed to send message with key={} : {}", record.key(), ex.getMessage());
+                saveFailedMessage(event, ex);
+            }
         }
     }
 

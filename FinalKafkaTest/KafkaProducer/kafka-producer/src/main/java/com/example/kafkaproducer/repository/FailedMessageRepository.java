@@ -8,5 +8,5 @@ import java.util.List;
 
 @Repository
 public interface FailedMessageRepository extends JpaRepository<FailedMessage, String> {
-    List<FailedMessage> findTop100ByOrderByCreatedAtAsc();
+    List<FailedMessage> findTop10ByOrderByCreatedAtAsc();
 }
