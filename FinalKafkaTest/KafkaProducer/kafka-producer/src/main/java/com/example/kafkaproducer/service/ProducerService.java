@@ -37,7 +37,7 @@ public class ProducerService {
 
     @Scheduled(fixedRate = 60_000)
     public void sendTransactionEvent() {
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 1000; i++) {
             try {
                 TransactionEvent event = new TransactionEvent(
                         UUID.randomUUID().toString(),
