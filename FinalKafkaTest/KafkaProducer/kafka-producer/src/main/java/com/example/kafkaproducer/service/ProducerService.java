@@ -24,7 +24,6 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
-@EnableScheduling
 @Slf4j
 
 public class ProducerService {

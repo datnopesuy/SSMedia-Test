@@ -20,7 +20,6 @@ import java.util.List;
 @Slf4j
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
-@EnableScheduling
 public class FailedMessageRetryService {
     FailedMessageRepository failedMessageRepository;
     KafkaTemplate<String, TransactionEvent> kafkaTemplate;

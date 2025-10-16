@@ -10,10 +10,14 @@ public class SchedulerConfig implements SchedulingConfigurer {
     @Override
     public void configureTasks(ScheduledTaskRegistrar taskRegistrar) {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(15);
-        scheduler.setThreadNamePrefix("Scheduler-task-");
-        scheduler.initialize();
-        scheduler.setAwaitTerminationSeconds(30);
+        scheduler.setCorePoolSize
+        scheduler.setMaxPoolSize(15);
+        scheduler.setThreadNamePrefix("scheduler-task-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);  // TRƯỚC initialize()
+        scheduler.initialize();  // Gọi CUỐI CÙNG
+
+        System.out.println("✅ SchedulerConfig loaded! Pool size = " + scheduler.getPoolSize());
         taskRegistrar.setTaskScheduler(scheduler);
     }
 }
