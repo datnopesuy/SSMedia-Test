@@ -31,7 +31,7 @@ public class FailedMessageRetryService {
 
         for (FailedMessage failedMessage : failedMessages) {
             try {
-                if(failedMessage.getRetryCount() > 5) {
+                if(failedMessage.getRetryCount() >= 5) {
                     // Đã vượt quá retry limit
                     TransactionEvent event = objectMapper.readValue(failedMessage.getPayloadJson(), TransactionEvent.class);
 

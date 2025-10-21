@@ -45,8 +45,6 @@ public class ConsumerService implements AcknowledgingMessageListener<String, Tra
     public void onMessage(ConsumerRecord<String, Transaction> data, Acknowledgment acknowledgment) {
         threadPoolService.submitTask(() -> {
             try {
-                Thread.sleep(2000);
-                System.out.println("Waiting for 2 seconds");
                 System.out.println("Received message: " + data.toString());
                 Transaction transaction = data.value();
 
