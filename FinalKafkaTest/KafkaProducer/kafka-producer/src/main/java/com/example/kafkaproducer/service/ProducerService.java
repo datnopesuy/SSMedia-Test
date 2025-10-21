@@ -1,19 +1,16 @@
 package com.example.kafkaproducer.service;
 
 import com.example.kafkaproducer.dto.TransactionEvent;
-import com.example.kafkaproducer.entity.FailedMessage;
-import com.example.kafkaproducer.repository.FailedMessageRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.transaction.Transactional;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.kafka.support.SendResult;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Recover;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -21,78 +18,91 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @RequiredArgsConstructor
 @FieldDefaults(level = AccessLevel.PRIVATE, makeFinal = true)
 @Slf4j
-
 public class ProducerService {
 
     KafkaTemplate<String, TransactionEvent> kafkaTemplate;
-    FailedMessageRepository failedMessageRepository;
-    ObjectMapper objectMapper;
 
     private static final String TOPIC = "transaction-logs";
     private static final String DLQ_TOPIC = "transaction-logs-dlq";
-    private static final int MAX_RETRIES = 5;
     Random random = new Random();
 
     @Scheduled(fixedDelay = 6_000)
     public void sendTransactionEvent() {
-        for (int i = 0; i < 100 ; i++) {
+        for (int i = 0; i < 100; i++) {
             try {
                 TransactionEvent event = new TransactionEvent(
                         UUID.randomUUID().toString(),
                         LocalDateTime.now(),
-                        "user-" + random.nextInt(100),
+                        "user-" + random.nextInt(1000),
                         BigDecimal.valueOf(random.nextDouble() * 1000)
                 );
                 sendWithRetry(event);
-            }catch (Exception ex) {
+            } catch (Exception ex) {
                 log.error("Unexpected error in iteration {}: {}", i, ex.getMessage());
             }
         }
     }
 
+    @Retryable(
+            value = {Exception.class},
+            maxAttempts = 5,
+            backoff = @Backoff(
+                    delay = 1000,
+                    multiplier = 2,
+                    maxDelay = 10000
+            )
+    )
     public void sendWithRetry(TransactionEvent event) {
-        var record = createProducerRecord(event);
+        ProducerRecord<String, TransactionEvent> record =
+                new ProducerRecord<>(TOPIC, event.userId(), event);
 
-        for (int retry = 0; retry < MAX_RETRIES; retry++) {
-            try {
-                kafkaTemplate.send(record).get();
-                log.info("Sent to topic={}, key={}, partition={}",
-                        TOPIC, record.key(), record.partition());
-                return;
-            }catch (Exception ex) {
-                log.warn("Retry {}/{} failed for key={} : {}", retry + 1, MAX_RETRIES, record.key(), ex.getMessage());
+        CompletableFuture<SendResult<String, TransactionEvent>> future =
+                kafkaTemplate.send(record);
 
-                if(retry < MAX_RETRIES - 1) {
-                    try {
-                        Thread.sleep(1000 * (retry + 1));
-                    }catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        log.error("Retry interrupted for key={}", event.id());
-                        break;
-                    }
-                }
+        future.whenComplete((result, ex) -> {
+            if (ex != null) {
+                log.error("Failed to send message with key={}: {}", event.id(), ex.getMessage());
+                throw new RuntimeException("Send failed", ex);
+            } else {
+                log.info("Sent to topic={}, key={}, partition={}, offset={}",
+                        TOPIC, event.id(),
+                        result.getRecordMetadata().partition(),
+                        result.getRecordMetadata().offset());
             }
+        });
+
+        // Block để đảm bảo thứ tự gửi trong cùng một userId
+        try {
+            future.get();
+        } catch (Exception e) {
+            throw new RuntimeException("Send failed", e);
         }
+    }
+
+    @Recover
+    public void recover(Exception e, TransactionEvent event) {
+        log.warn("All retries exhausted for message {}, sending to DLQ", event.id());
         sendToDLQ(event);
     }
 
     private void sendToDLQ(TransactionEvent event) {
         try {
-            kafkaTemplate.send(DLQ_TOPIC, event.id(), event).get();
-            log.warn("Moved message {} to DLQ after {} retries", event.id(), MAX_RETRIES);
-        }catch (Exception ex) {
-            log.error("Failed to send message {} to DLQ: {}", event.id(), ex.getMessage());
+            kafkaTemplate.send(DLQ_TOPIC, event.userId(), event)
+                    .whenComplete((result, ex) -> {
+                        if (ex != null) {
+                            log.error("Failed to send message {} to DLQ: {}", event.id(), ex.getMessage());
+                        } else {
+                            log.warn("Moved message {} to DLQ after max retries", event.id());
+                        }
+                    });
+        } catch (Exception ex) {
+            log.error("Critical: Failed to send message {} to DLQ: {}", event.id(), ex.getMessage());
         }
     }
-
-    public ProducerRecord<String, TransactionEvent> createProducerRecord(TransactionEvent transactionEvent) {
-        return new ProducerRecord<>(TOPIC, transactionEvent.id(), transactionEvent);
-    }
-
-
 }

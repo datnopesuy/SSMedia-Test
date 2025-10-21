@@ -42,6 +42,9 @@ spring:
         spring.json.use.type.headers: false
         spring.json.value.default.type: com.example.kafkaproducer.dto.TransactionEvent
       auto-offset-reset: earliest
+app:
+  kafka:
+    topic: transaction-logs
 
 server:
   port: 8081
