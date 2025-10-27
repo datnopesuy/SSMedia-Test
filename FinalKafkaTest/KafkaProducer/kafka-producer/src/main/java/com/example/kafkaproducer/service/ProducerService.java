@@ -1,6 +1,9 @@
 package com.example.kafkaproducer.service;
 
 import com.example.kafkaproducer.dto.TransactionEvent;
+import com.example.kafkaproducer.entity.FailedMessage;
+import com.example.kafkaproducer.repository.FailedMessageRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
@@ -27,6 +30,8 @@ import java.util.concurrent.CompletableFuture;
 public class ProducerService {
 
     KafkaTemplate<String, TransactionEvent> kafkaTemplate;
+    FailedMessageRepository failedMessageRepository;
+    ObjectMapper objectMapper;
 
     private static final String TOPIC = "transaction-logs";
     private static final String DLQ_TOPIC = "transaction-logs-dlq";
@@ -103,6 +108,28 @@ public class ProducerService {
                     });
         } catch (Exception ex) {
             log.error("Critical: Failed to send message {} to DLQ: {}", event.id(), ex.getMessage());
+            saveFailedMessage(event, ex.getMessage());
+        }
+    }
+
+    private void saveFailedMessage(TransactionEvent event, String errorMessage) {
+        try {
+            String payloadJson = objectMapper.writeValueAsString(event);
+
+            FailedMessage failedMessage = FailedMessage.builder()
+                    .id(event.id())
+                    .topicName(DLQ_TOPIC)
+                    .keyValue(event.userId())
+                    .payloadJson(payloadJson)
+                    .retryCount(0)
+                    .errorMessage(errorMessage)
+                    .createdAt(LocalDateTime.now())
+                    .build();
+
+            failedMessageRepository.save(failedMessage);
+            log.info(" Saved failed message {} to DB (reason={})", event.id(), errorMessage);
+        } catch (Exception e) {
+            log.error("Also failed to save FailedMessage for txId={} : {}", event.id(), e.getMessage());
         }
     }
 }
